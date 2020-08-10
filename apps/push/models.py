@@ -1,7 +1,7 @@
 # Adapted from djpubsubhubbub. See License: http://git.participatoryculture.org/djpubsubhubbub/tree/LICENSE
 
 from datetime import datetime, timedelta
-import feedparser
+from vendor import feedparser
 import requests
 import re
 
@@ -95,7 +95,7 @@ class PushSubscriptionManager(models.Manager):
         return requests.post(url, data=data)
 
 class PushSubscription(models.Model):
-    feed = models.OneToOneField(Feed, db_index=True, related_name='push')
+    feed = models.OneToOneField(Feed, db_index=True, related_name='push', on_delete=models.CASCADE)
     hub = models.URLField(db_index=True)
     topic = models.URLField(db_index=True)
     verified = models.BooleanField(default=False)
@@ -122,8 +122,8 @@ class PushSubscription(models.Model):
     def generate_token(self, mode):
         assert self.pk is not None, \
             'Subscription must be saved before generating token'
-        token = mode[:20] + hashlib.sha1('%s%i%s' % (
-                settings.SECRET_KEY, self.pk, mode)).hexdigest()
+        token = mode[:20] + hashlib.sha1(('%s%i%s' % (
+                settings.SECRET_KEY, self.pk, mode)).encode(encoding='utf-8')).hexdigest()
         self.verify_token = token
         self.save()
         return token
@@ -167,7 +167,7 @@ class PushSubscription(models.Model):
                                   unicode(self.feed)[:30], hub_url, self_url))
                     
                     
-    def __unicode__(self):
+    def __str__(self):
         if self.verified:
             verified = u'verified'
         else:

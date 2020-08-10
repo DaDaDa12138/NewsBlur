@@ -1,5 +1,5 @@
 import os
-import urlparse
+import urllib.parse
 import datetime
 import time
 import zlib
@@ -9,15 +9,15 @@ import re
 import mongoengine as mongo
 import random
 import requests
-import HTMLParser
+import html.parser as html_parser
 import tweepy
 from collections import defaultdict
-from BeautifulSoup import BeautifulSoup
+from bs4 import BeautifulSoup
 from mongoengine.queryset import Q
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.template.loader import render_to_string
 from django.template.defaultfilters import slugify
 from django.core.mail import EmailMultiAlternatives
@@ -37,7 +37,7 @@ from utils.story_functions import truncate_chars, strip_tags, linkify, image_siz
 from utils.image_functions import ImageOps
 from utils.scrubber import SelectiveScriptScrubber
 from utils import s3_utils
-from StringIO import StringIO
+from io import BytesIO
 
 try:
     from apps.social.spam import detect_spammers
@@ -61,19 +61,19 @@ class MRequestInvite(mongo.Document):
         'allow_inheritance': False,
     }
     
-    def __unicode__(self):
+    def __str__(self):
         return "%s%s" % (self.email, '*' if self.invite_sent else '')
     
     @classmethod
     def blast(cls):
         invites = cls.objects.filter(email_sent=None)
-        print ' ---> Found %s invites...' % invites.count()
+        print(' ---> Found %s invites...' % invites.count())
         
         for invite in invites:
             try:
                 invite.send_email()
             except:
-                print ' ***> Could not send invite to: %s. Deleting.' % invite.username
+                print(' ***> Could not send invite to: %s. Deleting.' % invite.username)
                 invite.delete()
         
     def send_email(self):
@@ -148,7 +148,7 @@ class MSocialProfile(mongo.Document):
         'allow_inheritance': False,
     }
     
-    def __unicode__(self):
+    def __str__(self):
         return "%s [%s] following %s/%s, shared %s" % (self.username, self.user_id, 
                                   self.following_count, self.follower_count, self.shared_stories_count)
     
@@ -260,9 +260,9 @@ class MSocialProfile(mongo.Document):
             for story in MSharedStory.objects(user_id=self.user_id).only('story_feed_id')[:500]:
                 publishers[story.story_feed_id] += 1
             feed_titles = dict((f.id, f.feed_title) 
-                               for f in Feed.objects.filter(pk__in=publishers.keys()).only('id', 'feed_title'))
+                               for f in Feed.objects.filter(pk__in=list(publishers.keys())).only('id', 'feed_title'))
             feed_publishers = sorted([{'id': k, 'feed_title': feed_titles[k], 'story_count': v} 
-                                      for k, v in publishers.items()
+                                      for k, v in list(publishers.items())
                                       if k in feed_titles],
                                      key=lambda f: f['story_count'],
                                      reverse=True)[:20]
@@ -722,7 +722,7 @@ class MSocialProfile(mongo.Document):
         for year in range(min_year, now.year+1):
             for month in range(1, 12+1):
                 if datetime.datetime(year, month, 1) < now:
-                    key = u'%s-%s' % (year, month)
+                    key = '%s-%s' % (year, month)
                     if dates.get(key) or start:
                         start = True
                         months.append((key, dates.get(key, 0)))
@@ -759,7 +759,7 @@ class MSocialProfile(mongo.Document):
             scores = []
             res = cls.objects(social_user_id=self.user_id).map_reduce(map_f, reduce_f, output='inline')
             for r in res:
-                facet_values = dict([(k, int(v)) for k,v in r.value.iteritems()])
+                facet_values = dict([(k, int(v)) for k,v in list(r.value.items())])
                 facet_values[facet] = r.key
                 scores.append(facet_values)
             scores = sorted(scores, key=lambda v: v['neg'] - v['pos'])
@@ -831,7 +831,7 @@ class MSocialSubscription(mongo.Document):
         'allow_inheritance': False,
     }
 
-    def __unicode__(self):
+    def __str__(self):
         user = User.objects.get(pk=self.user_id)
         subscription_user = User.objects.get(pk=self.subscription_user_id)
         return "Socialsub %s:%s" % (user, subscription_user)
@@ -862,7 +862,7 @@ class MSocialSubscription(mongo.Document):
                     social_sub.calculate_feed_scores()
                     
                 # Combine subscription read counts with feed/user info
-                feed = dict(social_sub.canonical().items() + social_profiles[user_id].items())
+                feed = dict(list(social_sub.canonical().items()) + list(social_profiles[user_id].items()))
                 social_feeds.append(feed)
 
         return social_feeds
@@ -1086,7 +1086,7 @@ class MSocialSubscription(mongo.Document):
             story_hashes_and_dates = range_func(ranked_stories_keys, offset, limit, withscores=True)
             if not story_hashes_and_dates:
                 return [], [], []
-            story_hashes, story_dates = zip(*story_hashes_and_dates)
+            story_hashes, story_dates = list(zip(*story_hashes_and_dates))
             if read_filter == "unread":
                 unread_story_hashes = story_hashes
             else:
@@ -1108,12 +1108,12 @@ class MSocialSubscription(mongo.Document):
         
         pipeline = rt.pipeline()
         for story_hash_group in chunks(story_hashes, 100):
-            pipeline.zadd(ranked_stories_keys, **dict(story_hash_group))
+            pipeline.zadd(ranked_stories_keys, dict(story_hash_group))
         pipeline.execute()
         story_hashes_and_dates = range_func(ranked_stories_keys, offset, limit, withscores=True)
         if not story_hashes_and_dates:
             return [], [], []
-        story_hashes, story_dates = zip(*story_hashes_and_dates)
+        story_hashes, story_dates = list(zip(*story_hashes_and_dates))
 
         if read_filter == "unread":
             unread_feed_story_hashes = story_hashes
@@ -1129,7 +1129,7 @@ class MSocialSubscription(mongo.Document):
             if unread_story_hashes:
                 pipeline = rt.pipeline()
                 for unread_story_hash_group in chunks(unread_story_hashes, 100):
-                    pipeline.zadd(unread_ranked_stories_keys, **dict(unread_story_hash_group))
+                    pipeline.zadd(unread_ranked_stories_keys, dict(unread_story_hash_group))
                 pipeline.execute()
             unread_feed_story_hashes = range_func(unread_ranked_stories_keys, offset, limit)
         
@@ -1476,7 +1476,7 @@ class MSharedStory(mongo.DynamicDocument):
         'strict': False,
     }
 
-    def __unicode__(self):
+    def __str__(self):
         user = User.objects.get(pk=self.user_id)
         return "%s: %s (%s)%s%s" % (user.username, 
                                     self.decoded_story_title[:20], 
@@ -1486,7 +1486,7 @@ class MSharedStory(mongo.DynamicDocument):
 
     @property
     def guid_hash(self):
-        return hashlib.sha1(self.story_guid).hexdigest()[:6]
+        return hashlib.sha1(self.story_guid.encode('utf-8')).hexdigest()[:6]
     
     @property
     def feed_guid_hash(self):
@@ -1494,7 +1494,7 @@ class MSharedStory(mongo.DynamicDocument):
     
     @property
     def decoded_story_title(self):
-        h = HTMLParser.HTMLParser()
+        h = html_parser.HTMLParser()
         return h.unescape(self.story_title)
         
     def canonical(self):
@@ -1551,7 +1551,7 @@ class MSharedStory(mongo.DynamicDocument):
 
     @classmethod
     def trim_old_stories(cls, stories=10, days=90, dryrun=False):
-        print " ---> Fetching shared story counts..."
+        print(" ---> Fetching shared story counts...")
         stats = settings.MONGODB.newsblur.shared_stories.aggregate([{
             "$group": {
                 "_id":      "$user_id",
@@ -1565,7 +1565,7 @@ class MSharedStory(mongo.DynamicDocument):
         month_ago = datetime.datetime.now() - datetime.timedelta(days=days)
         user_ids = list(stats)
         user_ids = sorted(user_ids, key=lambda x:x['stories'], reverse=True)
-        print " ---> Found %s users with more than %s starred stories" % (len(user_ids), stories)
+        print(" ---> Found %s users with more than %s starred stories" % (len(user_ids), stories))
 
         total = 0
         for stat in user_ids:
@@ -1579,17 +1579,17 @@ class MSharedStory(mongo.DynamicDocument):
             
             total += stat['stories']
             username = "%s (%s)" % (user and user.username or " - ", stat['_id'])
-            print " ---> %19.19s: %-20.20s %s stories" % (user and user.profile.last_seen_on or "Deleted",
+            print(" ---> %19.19s: %-20.20s %s stories" % (user and user.profile.last_seen_on or "Deleted",
                                                           username, 
-                                                          stat['stories'])
+                                                          stat['stories']))
             if not dryrun and stat['_id']:
                 cls.objects.filter(user_id=stat['_id']).delete()
             elif not dryrun and stat['_id'] == 0:
-                print " ---> Deleting unshared stories (user_id = 0)"
+                print(" ---> Deleting unshared stories (user_id = 0)")
                 cls.objects.filter(user_id=stat['_id']).delete()
                     
         
-        print " ---> Deleted %s stories in total." % total
+        print(" ---> Deleted %s stories in total." % total)
         
     def unshare_story(self):
         socialsubs = MSocialSubscription.objects.filter(subscription_user_id=self.user_id,
@@ -1764,7 +1764,7 @@ class MSharedStory(mongo.DynamicDocument):
                                                                    shared_feed_ids=shared_feed_ids)
         shared = 0
         
-        for story_hash, story_info in shared_stories_today.items():
+        for story_hash, story_info in list(shared_stories_today.items()):
             story, _ = MStory.find_story(story_info['feed_id'], story_info['story_hash'])
             if not story:
                 logging.user(popular_user, "~FRPopular stories, story not found: %s" % story_info)
@@ -1775,10 +1775,10 @@ class MSharedStory(mongo.DynamicDocument):
             
             if interactive:
                 feed = Feed.get_by_id(story.story_feed_id)
-                accept_story = raw_input("%s / %s [Y/n]: " % (story.decoded_story_title, feed.title))
+                accept_story = eval(input("%s / %s [Y/n]: " % (story.decoded_story_title, feed.title)))
                 if accept_story in ['n', 'N']: continue
                 
-            story_db = dict([(k, v) for k, v in story._data.items() 
+            story_db = dict([(k, v) for k, v in list(story._data.items()) 
                                 if k is not None and v is not None])
             story_db.pop('user_id', None)
             story_db.pop('id', None)
@@ -1836,7 +1836,7 @@ class MSharedStory(mongo.DynamicDocument):
         if drop:
             for key_name in ["C", "S"]:
                 keys = r.keys("%s:*" % key_name)
-                print " ---> Removing %s keys named %s:*" % (len(keys), key_name)
+                print(" ---> Removing %s keys named %s:*" % (len(keys), key_name))
                 for key in keys:
                     r.delete(key)
         for story in cls.objects.all():
@@ -1867,10 +1867,12 @@ class MSharedStory(mongo.DynamicDocument):
         
         r.sadd('B:%s' % self.user_id, self.feed_guid_hash)
         # r2.sadd('B:%s' % self.user_id, self.feed_guid_hash)
-        r.zadd('zB:%s' % self.user_id, self.feed_guid_hash,
-               time.mktime(self.shared_date.timetuple()))
-        # r2.zadd('zB:%s' % self.user_id, self.feed_guid_hash,
-        #        time.mktime(self.shared_date.timetuple()))
+        redis_data = {
+            self.feed_guid_hash : time.mktime(self.shared_date.timetuple())
+        }
+        r.zadd('zB:%s' % self.user_id, redis_data)
+        # r2.zadd('zB:%s' % self.user_id, {self.feed_guid_hash:
+        #        time.mktime(self.shared_date.timetuple())})
         r.expire('B:%s' % self.user_id, settings.DAYS_OF_STORY_HASHES*24*60*60)
         # r2.expire('B:%s' % self.user_id, settings.DAYS_OF_STORY_HASHES*24*60*60)
         r.expire('zB:%s' % self.user_id, settings.DAYS_OF_STORY_HASHES*24*60*60)
@@ -1948,7 +1950,7 @@ class MSharedStory(mongo.DynamicDocument):
                         'story_hash': story['story_hash'],
                         'user_id__in': sharer_user_ids,
                     }
-                    if params.has_key('story_db_id'):
+                    if 'story_db_id' in params:
                         params.pop('story_db_id')
                     shared_stories = cls.objects.filter(**params)\
                                                 .hint([('story_hash', 1)])
@@ -2298,7 +2300,7 @@ class MSharedStory(mongo.DynamicDocument):
         if self.image_urls and not force:
             return
             
-        soup = BeautifulSoup(zlib.decompress(self.story_content_z))
+        soup = BeautifulSoup(zlib.decompress(self.story_content_z), features="lxml")
         image_sources = [img.get('src') for img in soup.findAll('img') if img and img.get('src')]
         if len(image_sources) > 0:
             self.image_urls = image_sources
@@ -2328,11 +2330,11 @@ class MSharedStory(mongo.DynamicDocument):
                 continue
             req = requests.get(image_source, headers=headers, stream=True)
             try:
-                datastream = StringIO(req.content)
+                datastream = BytesIO(req.content)
                 width, height = ImageOps.image_size(datastream)
-            except IOError, e:
+            except IOError as e:
                 logging.debug(" ***> Couldn't read image: %s / %s" % (e, image_source))
-                datastream = StringIO(req.content[:100])
+                datastream = BytesIO(req.content[:100])
                 _, width, height = image_size(datastream)
             # if width <= 16 or height <= 16:
             #     continue
@@ -2400,7 +2402,7 @@ class MSocialServices(mongo.Document):
         'strict': False,
     }
     
-    def __unicode__(self):
+    def __str__(self):
         user = User.objects.get(pk=self.user_id)
         return "%s (Twitter: %s, FB: %s)" % (user.username, self.twitter_uid, self.facebook_uid)
         
@@ -2420,7 +2422,7 @@ class MSocialServices(mongo.Document):
             },
             'gravatar': {
                 'gravatar_picture_url': "https://www.gravatar.com/avatar/" + \
-                                        hashlib.md5(user.email.lower()).hexdigest()
+                                        hashlib.md5(user.email.lower().encode('utf-8')).hexdigest()
             },
             'upload': {
                 'upload_picture_url': self.upload_picture_url
@@ -2487,7 +2489,7 @@ class MSocialServices(mongo.Document):
         api = self.twitter_api()
         try:
             twitter_user = api.me()
-        except tweepy.TweepError, e:
+        except tweepy.TweepError as e:
             api = None
         
         if not api:
@@ -2513,8 +2515,8 @@ class MSocialServices(mongo.Document):
             self.set_photo('twitter')
 
         try:
-            friend_ids = list(unicode(friend.id) for friend in tweepy.Cursor(api.friends).items())
-        except tweepy.TweepError, e:
+            friend_ids = list(str(friend.id) for friend in list(tweepy.Cursor(api.friends).items()))
+        except tweepy.TweepError as e:
             logging.user(user, "~BG~FMTwitter import ~SBfailed~SN: %s" % e)
             return
         if not friend_ids:
@@ -2574,7 +2576,7 @@ class MSocialServices(mongo.Document):
             self.save()
             return
 
-        facebook_friend_ids = [unicode(friend["id"]) for friend in friends["data"]]
+        facebook_friend_ids = [str(friend["id"]) for friend in friends["data"]]
         self.facebook_friend_ids = facebook_friend_ids
         self.facebook_refresh_date = datetime.datetime.utcnow()
         self.facebook_picture_url = "https://graph.facebook.com/%s/picture" % self.facebook_uid
@@ -2650,7 +2652,7 @@ class MSocialServices(mongo.Document):
         elif service == 'gravatar':
             user = User.objects.get(pk=self.user_id)
             profile.photo_url = "https://www.gravatar.com/avatar/" + \
-                                hashlib.md5(user.email).hexdigest()
+                                hashlib.md5(user.email.encode('utf-8')).hexdigest()
         profile.save()
         return profile
     
@@ -2662,7 +2664,7 @@ class MSocialServices(mongo.Document):
             week_ago = datetime.datetime.now() - datetime.timedelta(days=days)
             shares = MSharedStory.objects.filter(shared_date__gte=week_ago)
             sharers = sorted(set([s.user_id for s in shares]))
-        print " ---> %s sharing user_ids" % len(sorted(sharers))
+        print(" ---> %s sharing user_ids" % len(sorted(sharers)))
 
         for user_id in sharers:
             try:
@@ -2673,9 +2675,9 @@ class MSocialServices(mongo.Document):
             ss = MSocialServices.objects.get(user_id=user_id)
             try:
                 ss.sync_twitter_photo()
-                print " ---> Syncing %s" % user_id
-            except Exception, e:
-                print " ***> Exception on %s: %s" % (user_id, e)
+                print(" ---> Syncing %s" % user_id)
+            except Exception as e:
+                print(" ***> Exception on %s: %s" % (user_id, e))
 
     def sync_twitter_photo(self):
         profile = MSocialProfile.get_user(self.user_id)
@@ -2689,7 +2691,7 @@ class MSocialServices(mongo.Document):
         try:
             api = self.twitter_api()
             me = api.me()
-        except (tweepy.TweepError, TypeError), e:
+        except (tweepy.TweepError, TypeError) as e:
             logging.user(user, "~FRException (%s): ~FCsetting to blank profile photo" % e)
             self.twitter_picture_url = None
             self.set_photo("nothing")
@@ -2711,7 +2713,7 @@ class MSocialServices(mongo.Document):
                 os.remove(filename)
             else:
                 api.update_status(status=message)
-        except tweepy.TweepError, e:
+        except tweepy.TweepError as e:
             user = User.objects.get(pk=self.user_id)
             logging.user(user, "~FRTwitter error: ~SB%s" % e)
             return
@@ -2725,7 +2727,7 @@ class MSocialServices(mongo.Document):
         logging.user(user, "~FCFetching image for twitter: ~SB%s" % shared_story.image_urls[0])
         
         url = shared_story.image_urls[0]
-        image_filename = os.path.basename(urlparse.urlparse(url).path)
+        image_filename = os.path.basename(urllib.parse.urlparse(url).path)
         req = requests.get(url, stream=True)
         filename = "/tmp/%s-%s" % (shared_story.story_hash, image_filename)
         
@@ -2753,7 +2755,7 @@ class MSocialServices(mongo.Document):
                            website=shared_story.blurblog_permalink(),
                            message=message,
                            )
-        except facebook.GraphAPIError, e:
+        except facebook.GraphAPIError as e:
             logging.debug("---> ~SN~FMFacebook posting error, disconnecting: ~SB~FR%s" % e)
             self.disconnect_facebook()
             return
@@ -2779,7 +2781,7 @@ class MInteraction(mongo.Document):
         'ordering': ['-date'],
     }
     
-    def __unicode__(self):
+    def __str__(self):
         user = User.objects.get(pk=self.user_id)
         with_user = self.with_user_id and User.objects.get(pk=self.with_user_id)
         return "<%s> %s on %s: %s - %s" % (user.username, with_user and with_user.username, self.date, 
@@ -3038,7 +3040,7 @@ class MActivity(mongo.Document):
         'ordering': ['-date'],
     }
     
-    def __unicode__(self):
+    def __str__(self):
         user = User.objects.get(pk=self.user_id)
         return "<%s> %s - %s" % (user.username, self.category, self.content and self.content[:20])
     

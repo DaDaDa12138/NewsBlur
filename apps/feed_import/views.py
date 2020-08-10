@@ -10,10 +10,8 @@ from django.contrib.auth.models import User
 # from django.db import IntegrityError
 from django.http import HttpResponse, HttpResponseRedirect
 from django.conf import settings
-from django.core.urlresolvers import reverse
-from django.template import RequestContext
+from django.urls import reverse
 from django.contrib.auth import login as login_user
-from django.shortcuts import render_to_response
 from apps.reader.forms import SignupForm
 from apps.reader.models import UserSubscription
 from apps.feed_import.models import OAuthToken
@@ -75,8 +73,8 @@ def opml_upload(request):
 def opml_export(request):
     user     = get_user(request)
     now      = datetime.datetime.now()
-    if request.REQUEST.get('user_id') and user.is_staff:
-        user = User.objects.get(pk=request.REQUEST['user_id'])
+    if request.GET.get('user_id') and user.is_staff:
+        user = User.objects.get(pk=request.GET['user_id'])
     exporter = OPMLExporter(user)
     opml     = exporter.process()
     
@@ -87,5 +85,4 @@ def opml_export(request):
     )
     
     return response
-
 

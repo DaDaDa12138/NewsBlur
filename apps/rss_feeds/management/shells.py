@@ -8,8 +8,8 @@ def import_objects(options, style):
     # XXX: (Temporary) workaround for ticket #1796: force early loading of all
     # models from installed apps. (this is fixed by now, but leaving it here
     # for people using 0.96 or older trunk (pre [5919]) versions.
-    from django.db.models.loading import get_models, get_apps
-    loaded_models = get_models()  # NOQA
+    from django.apps import apps
+    loaded_models = apps.get_models()  # NOQA
 
     from django.conf import settings
     imported_objects = {'settings': settings}
@@ -21,8 +21,8 @@ def import_objects(options, style):
 
     model_aliases = getattr(settings, 'SHELL_PLUS_MODEL_ALIASES', {})
 
-    for app_mod in get_apps():
-        app_models = get_models(app_mod)
+    for app_mod in list(apps.app_configs.items()):
+        app_models = apps.get_models(app_mod)
         if not app_models:
             continue
 
@@ -50,9 +50,9 @@ def import_objects(options, style):
 
             except AttributeError as e:
                 if not quiet_load:
-                    print(style.ERROR("Failed to import '%s' from '%s' reason: %s" % (model.__name__, app_name, str(e))))
+                    print((style.ERROR("Failed to import '%s' from '%s' reason: %s" % (model.__name__, app_name, str(e)))))
                 continue
         if not quiet_load:
-            print(style.SQL_COLTYPE("From '%s' autoload: %s" % (app_mod.__name__.split('.')[-2], ", ".join(model_labels))))
+            print((style.SQL_COLTYPE("From '%s' autoload: %s" % (app_mod.__name__.split('.')[-2], ", ".join(model_labels)))))
 
     return imported_objects

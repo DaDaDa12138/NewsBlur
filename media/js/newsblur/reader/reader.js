@@ -5621,7 +5621,7 @@
         // =============================
         // = Import from Google Reader =
         // =============================
-        
+
         start_count_unreads_after_import: function() {
             var self = this;
             var $progress = this.$s.$feeds_progress;

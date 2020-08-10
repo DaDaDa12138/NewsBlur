@@ -16,11 +16,10 @@ from apps.analyzer.models import compute_story_score
 from utils.story_functions import truncate_chars
 from utils import log as logging
 from utils import mongoengine_fields
-from HTMLParser import HTMLParser
+from html.parser import HTMLParser
 from vendor.apns import APNs, Payload
-from BeautifulSoup import BeautifulSoup, Tag
-import types
-import urlparse
+from bs4 import BeautifulSoup, Tag
+import urllib.parse
 
 class NotificationFrequency(enum.Enum):
     immediately = 1
@@ -38,7 +37,8 @@ class MUserNotificationTokens(mongo.Document):
         'collection': 'notification_tokens',
         'indexes': [{'fields': ['user_id'], 
                      'unique': True,
-                     'types': False, }],
+                     'types': False,
+                    }],
         'allow_inheritance': False,
     }
     
@@ -70,11 +70,12 @@ class MUserFeedNotification(mongo.Document):
         'indexes': ['feed_id',
                     {'fields': ['user_id', 'feed_id'], 
                      'unique': True,
-                     'types': False, }],
+                     'types': False,
+                    }],
         'allow_inheritance': False,
     }
     
-    def __unicode__(self):
+    def __str__(self):
         notification_types = []
         if self.is_email: notification_types.append('email')
         if self.is_web: notification_types.append('web')
@@ -177,7 +178,7 @@ class MUserFeedNotification(mongo.Document):
         def replace_with_newlines(element):
             text = ''
             for elem in element.recursiveChildGenerator():
-                if isinstance(elem, types.StringTypes):
+                if isinstance(elem, (str,)):
                     text += elem
                 elif elem.name == 'br':
                     text += '\n'
@@ -190,7 +191,7 @@ class MUserFeedNotification(mongo.Document):
         title = feed_title
         subtitle = HTMLParser().unescape(story['story_title'])
         # body = HTMLParser().unescape(strip_tags(story['story_content']))
-        soup = BeautifulSoup(story['story_content'].strip())
+        soup = BeautifulSoup(story['story_content'].strip(), features="lxml")
         # print story['story_content']
         body = replace_with_newlines(soup)
         body = truncate_chars(body.strip(), 600)
@@ -289,14 +290,14 @@ class MUserFeedNotification(mongo.Document):
         msg.attach_alternative(html, "text/html")
         try:
             msg.send()
-        except BotoServerError, e:
+        except BotoServerError as e:
             logging.user(usersub.user, '~BMStory notification by email error: ~FR%s' % e)
             return
         logging.user(usersub.user, '~BMStory notification by email: ~FY~SB%s~SN~BM~FY/~SB%s' % 
                                    (story['story_title'][:50], usersub.feed.feed_title[:50]))
     
     def sanitize_story(self, story_content):
-        soup = BeautifulSoup(story_content.strip())
+        soup = BeautifulSoup(story_content.strip(), features="lxml")
         fqdn = Site.objects.get_current().domain
         
         for iframe in soup("iframe"):
@@ -310,13 +311,13 @@ class MUserFeedNotification(mongo.Document):
             else:
                 iframe.extract()
         
-        return unicode(soup)
+        return str(soup)
     
     def extract_youtube_id(self, url):
         youtube_id = None
 
         if 'youtube.com' in url:
-            youtube_parts = urlparse.urlparse(url)
+            youtube_parts = urllib.parse.urlparse(url)
             if '/embed/' in youtube_parts.path:
                 youtube_id = youtube_parts.path.replace('/embed/', '')
                 

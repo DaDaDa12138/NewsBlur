@@ -29,7 +29,7 @@ class TimeZoneTestCase(TestCase):
     
     def assertFormIsValid(self, form):
         is_valid = form.is_valid()
-        self.assert_(is_valid,
+        self.assertTrue(is_valid,
             "Form did not validate (errors=%r, form=%r)" % (form._errors, form)
         )
 
@@ -75,16 +75,17 @@ class TimeZoneFieldTestCase(TimeZoneTestCase):
         f = timezones.forms.TimeZoneField()
         try:
             f.clean("BAD VALUE")
-        except forms.ValidationError, e:
+        except forms.ValidationError as e:
             self.assertEqual(e.messages, ["Select a valid choice. BAD VALUE is not one of the available choices."])
     
     def test_models_as_a_form(self):
         class ProfileForm(forms.ModelForm):
             class Meta:
                 model = test_models.Profile
+                fields = "__all__"
         form = ProfileForm()
         rendered = form.as_p()
-        self.assert_(
+        self.assertTrue(
             bool(re.search(r'<option value="[\w/]+">\([A-Z]+(?:\+|\-)\d{4}\)\s[\w/]+</option>', rendered)),
             "Did not find pattern in rendered form"
         )
@@ -93,6 +94,7 @@ class TimeZoneFieldTestCase(TimeZoneTestCase):
         class ProfileForm(forms.ModelForm):
             class Meta:
                 model = test_models.Profile
+                fields = "__all__"
         form = ProfileForm({"name": "Brian Rosner", "timezone": "America/Denver"})
         self.assertFormIsValid(form)
     
@@ -100,6 +102,7 @@ class TimeZoneFieldTestCase(TimeZoneTestCase):
         class ProfileForm(forms.ModelForm):
             class Meta:
                 model = test_models.Profile
+                fields = "__all__"
         form = ProfileForm({"name": "Brian Rosner", "timezone": "America/Denver"})
         self.assertFormIsValid(form)
         p = form.save()

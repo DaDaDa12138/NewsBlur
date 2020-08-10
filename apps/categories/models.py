@@ -17,7 +17,7 @@ class MCategory(mongo.Document):
         'allow_inheritance': False,
     }
     
-    def __unicode__(self):
+    def __str__(self):
         return "%s: %s sites" % (self.title, len(self.feed_ids))
     
     @classmethod
@@ -57,12 +57,12 @@ class MCategory(mongo.Document):
         for category_title, sites in category_groups:
             try:
                 category = cls.objects.get(title=category_title)
-            except cls.DoesNotExist, e:
-                print " ***> Missing category: %s" % category_title
+            except cls.DoesNotExist as e:
+                print(" ***> Missing category: %s" % category_title)
                 continue
             category.feed_ids = [site.feed_id for site in sites]
             category.save()
-            print " ---> Reloaded category: %s" % category
+            print(" ---> Reloaded category: %s" % category)
     
     @classmethod
     def subscribe(cls, user_id, category_title):
@@ -101,7 +101,7 @@ class MCategorySite(mongo.Document):
         'allow_inheritance': False,
     }
     
-    def __unicode__(self):
+    def __str__(self):
         feed = Feed.get_by_id(self.feed_id)
         return "%s: %s" % (self.category_title, feed)
     
@@ -111,6 +111,6 @@ class MCategorySite(mongo.Document):
                                                            feed_id=feed_id)
         
         if not created:
-            print " ---> Site is already in category: %s" % category_site
+            print(" ---> Site is already in category: %s" % category_site)
         else:
             MCategory.reload_sites(category_title)

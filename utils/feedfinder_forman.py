@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import print_function
+
 
 __version__ = "0.0.3"
 
@@ -15,7 +15,7 @@ if not __FEEDFINDER2_SETUP__:
 
     import logging
     import requests
-    from BeautifulSoup import BeautifulSoup
+    from bs4 import BeautifulSoup
     from six.moves.urllib import parse as urlparse
 
 
@@ -86,7 +86,7 @@ def find_feeds(url, check_all=False, user_agent=None):
     # Look for <link> tags.
     logging.info("Looking for <link> tags.")
     try:
-        tree = BeautifulSoup(feed_text)
+        tree = BeautifulSoup(feed_text, features="lxml")
     except ValueError:
         return []
     links = []
@@ -145,7 +145,7 @@ def url_feed_prob(url):
     if "georss" in url:
         return -1
     kw = ["atom", "rss", "rdf", ".xml", "feed", "json"]
-    for p, t in zip(range(len(kw), 0, -1), kw):
+    for p, t in zip(list(range(len(kw), 0, -1)), kw):
         if t in url:
             return p
     return 0
@@ -156,10 +156,10 @@ def sort_urls(feeds):
 
 
 if __name__ == "__main__":
-    print(find_feeds("www.preposterousuniverse.com/blog/"))
-    print(find_feeds("http://xkcd.com"))
-    print(find_feeds("dan.iel.fm/atom.xml"))
-    print(find_feeds("dan.iel.fm", check_all=True))
-    print(find_feeds("kapadia.github.io"))
-    print(find_feeds("blog.jonathansick.ca"))
-    print(find_feeds("asdasd"))
+    print((find_feeds("www.preposterousuniverse.com/blog/")))
+    print((find_feeds("http://xkcd.com")))
+    print((find_feeds("dan.iel.fm/atom.xml")))
+    print((find_feeds("dan.iel.fm", check_all=True)))
+    print((find_feeds("kapadia.github.io")))
+    print((find_feeds("blog.jonathansick.ca")))
+    print((find_feeds("asdasd")))

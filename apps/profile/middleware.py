@@ -12,13 +12,16 @@ from apps.statistics.rstats import round_time
 from utils import json_functions as json
 
 class LastSeenMiddleware(object):
+    def __init__(self, get_response=None):
+        self.get_response = get_response
+
     def process_response(self, request, response):
         if ((request.path == '/' or
              request.path.startswith('/reader/refresh_feeds') or
              request.path.startswith('/reader/load_feeds') or
              request.path.startswith('/reader/feeds'))
             and hasattr(request, 'user')
-            and request.user.is_authenticated()): 
+            and request.user.is_authenticated): 
             hour_ago = datetime.datetime.utcnow() - datetime.timedelta(minutes=60)
             ip = request.META.get('HTTP_X_FORWARDED_FOR', None) or request.META['REMOTE_ADDR']
             # SUBSCRIBER_EXPIRE = datetime.datetime.utcnow() - datetime.timedelta(days=settings.SUBSCRIBER_EXPIRE)
@@ -36,8 +39,22 @@ class LastSeenMiddleware(object):
             request.user.profile.save()
         
         return response
-        
+
+    def __call__(self, request):
+        response = None
+        if hasattr(self, 'process_request'):
+            response = self.process_request(request)
+        if not response:
+            response = self.get_response(request)
+        if hasattr(self, 'process_response'):
+            response = self.process_response(request, response)
+
+        return response
+
 class DBProfilerMiddleware:
+    def __init__(self, get_response=None):
+        self.get_response = get_response
+
     def process_request(self, request): 
         setattr(request, 'activated_segments', [])
         if ((request.path.startswith('/reader/feed') or
@@ -85,7 +102,7 @@ class DBProfilerMiddleware:
         r = redis.Redis(connection_pool=settings.REDIS_STATISTICS_POOL)
         pipe = r.pipeline()
         minute = round_time(round_to=60)
-        for db, duration in db_times.items():
+        for db, duration in list(db_times.items()):
             key = "DB:%s%s:%s" % (prefix, db, minute.strftime('%s'))
             pipe.incr("%s:c" % key)
             pipe.expireat("%s:c" % key, (minute + datetime.timedelta(days=2)).strftime("%s"))
@@ -94,8 +111,21 @@ class DBProfilerMiddleware:
                 pipe.expireat("%s:t" % key, (minute + datetime.timedelta(days=2)).strftime("%s"))
         pipe.execute()
 
+    def __call__(self, request):
+        response = None
+        if hasattr(self, 'process_request'):
+            response = self.process_request(request)
+        if not response:
+            response = self.get_response(request)
+        if hasattr(self, 'process_response'):
+            response = self.process_response(request, response)
+
+        return response
 
 class SQLLogToConsoleMiddleware:
+    def __init__(self, get_response=None):
+        self.get_response = get_response
+
     def activated(self, request):
         return (settings.DEBUG_QUERIES or 
                 (hasattr(request, 'activated_segments') and
@@ -106,6 +136,8 @@ class SQLLogToConsoleMiddleware:
         if connection.queries:
             time_elapsed = sum([float(q['time']) for q in connection.queries])
             queries = connection.queries
+            if getattr(connection, 'queriesx', False):
+                queries.extend(connection.queriesx)
             for query in queries:
                 if query.get('mongo'):
                     query['sql'] = "~FM%s: %s" % (query['mongo']['collection'], query['mongo']['query'])
@@ -136,6 +168,17 @@ class SQLLogToConsoleMiddleware:
         
     def process_celery(self, profiler):
         self.process_response(profiler, None)
+
+    def __call__(self, request):
+        response = None
+        if hasattr(self, 'process_request'):
+            response = self.process_request(request)
+        if not response:
+            response = self.get_response(request)
+        if hasattr(self, 'process_response'):
+            response = self.process_response(request, response)
+
+        return response
 
 SIMPSONS_QUOTES = [
     ("Homer", "D'oh."),
@@ -242,23 +285,62 @@ SIMPSONS_QUOTES = [
 ]
 
 class SimpsonsMiddleware:
+    def __init__(self, get_response=None):
+        self.get_response = get_response
+
     def process_response(self, request, response):
         quote = random.choice(SIMPSONS_QUOTES)
         source = quote[0].replace(' ', '-')
         response["X-%s" % source] = quote[1]
 
         return response
+
+    def __call__(self, request):
+        response = None
+        if hasattr(self, 'process_request'):
+            response = self.process_request(request)
+        if not response:
+            response = self.get_response(request)
+        if hasattr(self, 'process_response'):
+            response = self.process_response(request, response)
+
+        return response
         
 class ServerHostnameMiddleware:
+
+    def __init__(self, get_response=None):
+        self.get_response = get_response
+
     def process_response(self, request, response):
         response["X-gunicorn-server"] = settings.SERVER_NAME
 
         return response
 
+    def __call__(self, request):
+        response = None
+        if hasattr(self, 'process_request'):
+            response = self.process_request(request)
+        if not response:
+            response = self.get_response(request)
+        if hasattr(self, 'process_response'):
+            response = self.process_response(request, response)
+
+        return response
+
 class TimingMiddleware:
+
+    def __init__(self, get_response=None):
+        self.get_response = get_response
+
     def process_request(self, request):
         setattr(request, 'start_time', time.time())
 
+    def __call__(self, request):
+        response = self.process_request(request)
+        if not response:
+            response = self.get_response(request)
+
+        return response
 BANNED_USER_AGENTS = (
     'feed reader-background',
     'missing',
@@ -268,6 +350,9 @@ BANNED_USERNAMES = (
 )
 
 class UserAgentBanMiddleware:
+    def __init__(self, get_response=None):
+        self.get_response = get_response
+
     def process_request(self, request):
         user_agent = request.environ.get('HTTP_USER_AGENT', 'missing').lower()
         
@@ -287,7 +372,7 @@ class UserAgentBanMiddleware:
             
             return HttpResponse(json.encode(data), status=403, mimetype='text/json')
 
-        if request.user.is_authenticated() and any(username == request.user.username for username in BANNED_USERNAMES):
+        if request.user.is_authenticated and any(username == request.user.username for username in BANNED_USERNAMES):
             data = {
                 'error': 'User banned: %s' % request.user.username,
                 'code': -1
@@ -295,4 +380,15 @@ class UserAgentBanMiddleware:
             logging.user(request, "~FB~SN~BBBanned Username: ~SB%s / %s (%s)" % (request.user, request.path, request.META))
             
             return HttpResponse(json.encode(data), status=403, mimetype='text/json')
+    
+    def __call__(self, request):
+        response = None
+        if hasattr(self, 'process_request'):
+            response = self.process_request(request)
+        if not response:
+            response = self.get_response(request)
+        if hasattr(self, 'process_response'):
+            response = self.process_response(request, response)
+
+        return response
 

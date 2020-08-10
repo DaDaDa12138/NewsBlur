@@ -1,13 +1,12 @@
 import os
 import base64
-import urlparse
+import urllib.parse
 import datetime
 import lxml.html
 from django import forms
 from django.conf import settings
 from django.http import HttpResponse
-from django.shortcuts import render_to_response
-from django.template import RequestContext
+from django.shortcuts import render
 from django.contrib.auth import login as login_user
 from django.contrib.auth import logout as logout_user
 from apps.reader.forms import SignupForm, LoginForm
@@ -38,7 +37,7 @@ def login(request):
         if form.errors:
             errors = form.errors
         if form.is_valid():
-            login_user(request, form.get_user())
+            login_user(request, form.get_user(), backend='django.contrib.auth.backends.ModelBackend')
             logging.user(request, "~FG~BB~SKAPI Login~SN~FW: %s / %s" % (user_agent, ip))
             code = 1
     else:
@@ -59,10 +58,10 @@ def signup(request):
         if form.is_valid():
             try:
                 new_user = form.save()
-                login_user(request, new_user)
+                login_user(request, new_user, backend='django.contrib.auth.backends.ModelBackend')
                 logging.user(request, "~FG~SB~BBAPI NEW SIGNUP: ~FW%s / %s" % (new_user.email, ip))
                 code = 1
-            except forms.ValidationError, e:
+            except forms.ValidationError as e:
                 errors = [e.args[0]]
     else:
         errors = dict(method="Invalid method. Use POST. You used %s" % request.method)
@@ -110,7 +109,7 @@ def add_site_load_script(request, token):
     except UserSubscriptionFolders.DoesNotExist:
         code = -1
     
-    return render_to_response('api/share_bookmarklet.js', {
+    return render(request, 'api/share_bookmarklet.js', {
         'code': code,
         'token': token,
         'folders': (usf and usf.folders) or [],
@@ -121,9 +120,8 @@ def add_site_load_script(request, token):
         'error_image': error_image,
         'add_image': add_image,
         'new_folder_image': new_folder_image,
-    }, 
-    context_instance=RequestContext(request),
-    mimetype='application/javascript')
+    },
+    content_type='application/javascript')
 
 def add_site(request, token):
     code       = 0
@@ -223,7 +221,7 @@ def check_share_on_site(request, token):
         logging.user(request.user, "~FBFinding feed (check_share_on_site): %s" % story_url)
         feed = Feed.get_feed_from_url(story_url, create=False, fetch=False)
     if not feed:
-        parsed_url = urlparse.urlparse(story_url)
+        parsed_url = urllib.parse.urlparse(story_url)
         base_url = "%s://%s%s" % (parsed_url.scheme, parsed_url.hostname, parsed_url.path)
         logging.user(request.user, "~FBFinding feed (check_share_on_site): %s" % base_url)
         feed = Feed.get_feed_from_url(base_url, create=False, fetch=False)
@@ -285,17 +283,17 @@ def check_share_on_site(request, token):
 @required_params('story_url', 'comments', 'title')
 def share_story(request, token=None):
     code      = 0
-    story_url = request.REQUEST['story_url']
-    comments  = request.REQUEST['comments']
-    title     = request.REQUEST['title']
-    content   = request.REQUEST.get('content', None)
-    rss_url   = request.REQUEST.get('rss_url', None)
-    feed_id   = request.REQUEST.get('feed_id', None) or 0
+    story_url = request.POST['story_url']
+    comments  = request.POST['comments']
+    title     = request.POST['title']
+    content   = request.POST.get('content', None)
+    rss_url   = request.POST.get('rss_url', None)
+    feed_id   = request.POST.get('feed_id', None) or 0
     feed      = None
     message   = None
     profile   = None
     
-    if request.user.is_authenticated():
+    if request.user.is_authenticated:
         profile = request.user.profile
     else:
         try:

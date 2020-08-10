@@ -16,7 +16,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.core.mail import EmailMultiAlternatives
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.template.loader import render_to_string
 from apps.rss_feeds.models import Feed, MStory, MStarredStory
 from apps.rss_feeds.tasks import SchedulePremiumSetup
@@ -28,16 +28,15 @@ from utils import json_functions as json
 from utils.user_functions import generate_secret_token
 from utils.feed_functions import chunks
 from vendor.timezones.fields import TimeZoneField
-from vendor.paypal.standard.ipn.signals import subscription_signup, payment_was_successful, recurring_payment
-from vendor.paypal.standard.ipn.signals import payment_was_flagged
-from vendor.paypal.standard.ipn.models import PayPalIPN
+from paypal.standard.ipn.signals import valid_ipn_received, invalid_ipn_received
+from paypal.standard.ipn.models import PayPalIPN
 from vendor.paypalapi.interface import PayPalInterface
 from vendor.paypalapi.exceptions import PayPalAPIResponseError
 from zebra.signals import zebra_webhook_customer_subscription_created
 from zebra.signals import zebra_webhook_charge_succeeded
 
 class Profile(models.Model):
-    user              = models.OneToOneField(User, unique=True, related_name="profile")
+    user              = models.OneToOneField(User, unique=True, related_name="profile", on_delete=models.CASCADE)
     is_premium        = models.BooleanField(default=False)
     premium_expire    = models.DateTimeField(blank=True, null=True)
     send_emails       = models.BooleanField(default=True)
@@ -58,7 +57,7 @@ class Profile(models.Model):
     stripe_4_digits   = models.CharField(max_length=4, blank=True, null=True)
     stripe_id         = models.CharField(max_length=24, blank=True, null=True)
     
-    def __unicode__(self):
+    def __str__(self):
         return "%s <%s> (Premium: %s)" % (self.user, self.user.email, self.is_premium)
     
     @property
@@ -91,11 +90,11 @@ class Profile(models.Model):
         try:
             super(Profile, self).save(*args, **kwargs)
         except DatabaseError:
-            print " ---> Profile not saved. Table isn't there yet."
+            print(" ---> Profile not saved. Table isn't there yet.")
     
     def delete_user(self, confirm=False, fast=False):
         if not confirm:
-            print " ---> You must pass confirm=True to delete this user."
+            print(" ---> You must pass confirm=True to delete this user.")
             return
         
         logging.user(self.user, "Deleting user: %s / %s" % (self.user.email, self.user.profile.last_seen_ip))
@@ -340,7 +339,7 @@ class Profile(models.Model):
             customers = [c['customer'] for c in charges if 'customer' in c]
             for customer in customers:
                 if not customer:
-                    print " ***> No customer!"
+                    print(" ***> No customer!")
                     continue
                 try:
                     profile = Profile.objects.get(stripe_id=customer)
@@ -530,15 +529,15 @@ class Profile(models.Model):
                 has_profile = user.profile.last_seen_ip
             except Profile.DoesNotExist:
                 usernames.add(user.username)
-                print " ---> Missing profile: %-20s %-30s %-6s %-6s" % (user.username, user.email, opens, reads)
+                print(" ---> Missing profile: %-20s %-30s %-6s %-6s" % (user.username, user.email, opens, reads))
                 continue
 
             if opens is None and not reads and has_numbers:
                 usernames.add(user.username)
-                print " ---> Numerics: %-20s %-30s %-6s %-6s" % (user.username, user.email, opens, reads)
+                print(" ---> Numerics: %-20s %-30s %-6s %-6s" % (user.username, user.email, opens, reads))
             elif not has_profile:
                 usernames.add(user.username)
-                print " ---> No IP: %-20s %-30s %-6s %-6s" % (user.username, user.email, opens, reads)
+                print(" ---> No IP: %-20s %-30s %-6s %-6s" % (user.username, user.email, opens, reads))
         
         if not confirm: return usernames
         
@@ -586,7 +585,7 @@ class Profile(models.Model):
             else:
                 user_ids = dict([(us.user_id, us.active) 
                                  for us in UserSubscription.objects.filter(feed_id=feed_id).only('user', 'active')])
-            profiles = Profile.objects.filter(user_id__in=user_ids.keys()).values('user_id', 'last_seen_on', 'is_premium')
+            profiles = Profile.objects.filter(user_id__in=list(user_ids.keys())).values('user_id', 'last_seen_on', 'is_premium')
             feed = Feed.get_by_id(feed_id)
             
             if entire_feed_counted:
@@ -600,10 +599,10 @@ class Profile(models.Model):
                     muted_feed = not bool(user_ids[profile['user_id']])
                     if muted_feed:
                         last_seen_on = 0
-                    pipeline.zadd(key, profile['user_id'], last_seen_on)
+                    pipeline.zadd(key, { profile['user_id']: last_seen_on })
                     total += 1
                     if profile['is_premium']:
-                        pipeline.zadd(premium_key, profile['user_id'], last_seen_on)
+                        pipeline.zadd(premium_key, { profile['user_id']: last_seen_on })
                         premium += 1
                     else:
                         pipeline.zrem(premium_key, profile['user_id'])
@@ -616,9 +615,9 @@ class Profile(models.Model):
             
             if entire_feed_counted:
                 now = int(datetime.datetime.now().strftime('%s'))
-                r.zadd(key, -1, now)
+                r.zadd(key, { -1: now })
                 r.expire(key, settings.SUBSCRIBER_EXPIRE*24*60*60)
-                r.zadd(premium_key, -1, now)
+                r.zadd(premium_key, {-1: now})
                 r.expire(premium_key, settings.SUBSCRIBER_EXPIRE*24*60*60)
             
             logging.info("   ---> [%-30s] ~SN~FBCounting subscribers, storing in ~SBredis~SN: ~FMt:~SB~FM%s~SN a:~SB%s~SN p:~SB%s~SN ap:~SB%s" % 
@@ -644,9 +643,9 @@ class Profile(models.Model):
                     last_seen_on = int(user.profile.last_seen_on.strftime('%s'))
                     if feed_ids is muted_feed_ids:
                         last_seen_on = 0
-                    pipeline.zadd(key, user.pk, last_seen_on)
+                    pipeline.zadd(key, { user.pk: last_seen_on })
                     if user.profile.is_premium:
-                        pipeline.zadd(premium_key, user.pk, last_seen_on)
+                        pipeline.zadd(premium_key, { user.pk: last_seen_on })
                     else:
                         pipeline.zrem(premium_key, user.pk)
                 pipeline.execute()
@@ -772,7 +771,7 @@ class Profile(models.Model):
     
     def send_forgot_password_email(self, email=None):
         if not self.user.email and not email:
-            print "Please provide an email address."
+            print("Please provide an email address.")
             return
         
         if not self.user.email and email:
@@ -793,7 +792,7 @@ class Profile(models.Model):
     
     def send_new_user_queue_email(self, force=False):
         if not self.user.email:
-            print "Please provide an email address."
+            print("Please provide an email address.")
             return
         
         params = dict(receiver_user_id=self.user.pk, email_type='new_user_queue')
@@ -819,7 +818,7 @@ class Profile(models.Model):
     
     def send_upload_opml_finished_email(self, feed_count):
         if not self.user.email:
-            print "Please provide an email address."
+            print("Please provide an email address.")
             return
         
         user    = self.user
@@ -836,7 +835,7 @@ class Profile(models.Model):
     
     def send_import_reader_finished_email(self, feed_count):
         if not self.user.email:
-            print "Please provide an email address."
+            print("Please provide an email address.")
             return
         
         user    = self.user
@@ -853,7 +852,7 @@ class Profile(models.Model):
     
     def send_import_reader_starred_finished_email(self, feed_count, starred_count):
         if not self.user.email:
-            print "Please provide an email address."
+            print("Please provide an email address.")
             return
         
         user    = self.user
@@ -1047,10 +1046,10 @@ class Profile(models.Model):
         
 
 class StripeIds(models.Model):
-    user = models.ForeignKey(User, related_name='stripe_ids')
+    user = models.ForeignKey(User, related_name='stripe_ids', on_delete=models.CASCADE, null=True)
     stripe_id = models.CharField(max_length=24, blank=True, null=True)
 
-    def __unicode__(self):
+    def __str__(self):
         return "%s: %s" % (self.user.username, self.stripe_id)
 
         
@@ -1078,7 +1077,7 @@ def paypal_signup(sender, **kwargs):
     user.profile.activate_premium()
     user.profile.cancel_premium_stripe()
     user.profile.cancel_premium_paypal(second_most_recent_only=True)
-subscription_signup.connect(paypal_signup)
+valid_ipn_received.connect(paypal_signup)
 
 def paypal_payment_history_sync(sender, **kwargs):
     ipn_obj = sender
@@ -1091,7 +1090,7 @@ def paypal_payment_history_sync(sender, **kwargs):
         user.profile.setup_premium_history()
     except:
         return {"code": -1, "message": "User doesn't exist."}
-payment_was_successful.connect(paypal_payment_history_sync)
+valid_ipn_received.connect(paypal_payment_history_sync)
 
 def paypal_payment_was_flagged(sender, **kwargs):
     ipn_obj = sender
@@ -1105,7 +1104,7 @@ def paypal_payment_was_flagged(sender, **kwargs):
         logging.user(user, "~BC~SB~FBPaypal subscription payment flagged")
     except:
         return {"code": -1, "message": "User doesn't exist."}
-payment_was_flagged.connect(paypal_payment_was_flagged)
+invalid_ipn_received.connect(paypal_payment_was_flagged)
 
 def paypal_recurring_payment_history_sync(sender, **kwargs):
     ipn_obj = sender
@@ -1118,7 +1117,7 @@ def paypal_recurring_payment_history_sync(sender, **kwargs):
         user.profile.setup_premium_history()
     except:
         return {"code": -1, "message": "User doesn't exist."}
-recurring_payment.connect(paypal_recurring_payment_history_sync)
+valid_ipn_received.connect(paypal_recurring_payment_history_sync)
 
 def stripe_signup(sender, full_json, **kwargs):
     stripe_id = full_json['data']['object']['customer']
@@ -1170,7 +1169,7 @@ def blank_authenticate(username, password=""):
         return user
         
     algorithm, salt, hash = user.password.split('$', 2)
-    encoded_blank = hashlib.sha1(salt + password).hexdigest()
+    encoded_blank = hashlib.sha1((salt + password).encode(encoding='utf-8')).hexdigest()
     encoded_username = authenticate(username=username, password=username)
     if encoded_blank == hash or encoded_username == user:
         return user
@@ -1191,10 +1190,11 @@ class MEmailUnsubscribe(mongo.Document):
         'indexes': ['user_id', 
                     {'fields': ['user_id', 'email_type'], 
                      'unique': True,
-                     'types': False}],
+                     'types': False,
+                    }],
     }
     
-    def __unicode__(self):
+    def __str__(self):
         return "%s unsubscribed from %s on %s" % (self.user_id, self.email_type, self.date)
     
     @classmethod
@@ -1219,7 +1219,7 @@ class MSentEmail(mongo.Document):
         'indexes': ['sending_user_id', 'receiver_user_id', 'email_type'],
     }
     
-    def __unicode__(self):
+    def __str__(self):
         return "%s sent %s email to %s" % (self.sending_user_id, self.email_type, self.receiver_user_id)
     
     @classmethod
@@ -1229,13 +1229,13 @@ class MSentEmail(mongo.Document):
                            sending_user_id=sending_user_id)
 
 class PaymentHistory(models.Model):
-    user = models.ForeignKey(User, related_name='payments')
+    user = models.ForeignKey(User, related_name='payments', on_delete=models.CASCADE)
     payment_date = models.DateTimeField()
     payment_amount = models.IntegerField()
     payment_provider = models.CharField(max_length=20)
     payment_identifier = models.CharField(max_length=100, null=True)
     
-    def __unicode__(self):
+    def __str__(self):
         return "[%s] $%s/%s" % (self.payment_date.strftime("%Y-%m-%d"), self.payment_amount,
                                 self.payment_provider)
     class Meta:
@@ -1266,7 +1266,7 @@ class PaymentHistory(models.Model):
             return payments, output
 
         output += "\nMonthly Totals:\n"
-        for m in reversed(range(months)):
+        for m in reversed(list(range(months))):
             now = datetime.datetime.now()
             start_date = datetime.datetime(now.year, now.month, 1) - dateutil.relativedelta.relativedelta(months=m)
             end_time = start_date + datetime.timedelta(days=31)
@@ -1282,7 +1282,7 @@ class PaymentHistory(models.Model):
         this_mtd_sum = 0
         last_mtd_count = 0
         this_mtd_count = 0
-        for y in reversed(range(years)):
+        for y in reversed(list(range(years))):
             now = datetime.datetime.now()
             start_date = datetime.datetime(now.year, now.month, 1) - dateutil.relativedelta.relativedelta(years=y)
             end_date = now - dateutil.relativedelta.relativedelta(years=y)
@@ -1302,7 +1302,7 @@ class PaymentHistory(models.Model):
         last_month_avg = 0
         last_month_sum = 0
         last_month_count = 0
-        for y in reversed(range(years)):
+        for y in reversed(list(range(years))):
             now = datetime.datetime.now()
             start_date = datetime.datetime(now.year, now.month, 1) - dateutil.relativedelta.relativedelta(years=y)
             end_time = start_date + datetime.timedelta(days=31)
@@ -1326,7 +1326,7 @@ class PaymentHistory(models.Model):
         last_ytd_sum = 0
         this_ytd_count = 0
         last_ytd_count = 0
-        for y in reversed(range(years)):
+        for y in reversed(list(range(years))):
             now = datetime.datetime.now()
             start_date = datetime.datetime(now.year, 1, 1) - dateutil.relativedelta.relativedelta(years=y)
             end_date = now - dateutil.relativedelta.relativedelta(years=y)
@@ -1346,7 +1346,7 @@ class PaymentHistory(models.Model):
         last_year_sum = 0
         last_year_count = 0
         annual = 0
-        for y in reversed(range(years)):
+        for y in reversed(list(range(years))):
             now = datetime.datetime.now()
             start_date = datetime.datetime(now.year, 1, 1) - dateutil.relativedelta.relativedelta(years=y)
             end_date = datetime.datetime(now.year, 1, 1) - dateutil.relativedelta.relativedelta(years=y-1) - datetime.timedelta(seconds=1)
@@ -1366,7 +1366,7 @@ class PaymentHistory(models.Model):
         total = cls.objects.all().aggregate(sum=Sum('payment_amount'))
         output += "\nTotal: $%s\n" % total['sum']
         
-        print output
+        print(output)
         
         return {'annual': annual, 'output': output}
 
@@ -1385,7 +1385,7 @@ class MGiftCode(mongo.Document):
         'indexes': ['gifting_user_id', 'receiving_user_id', 'created_date'],
     }
     
-    def __unicode__(self):
+    def __str__(self):
         return "%s gifted %s on %s: %s (redeemed %s times)" % (self.gifting_user_id, self.receiving_user_id, self.created_date, self.gift_code, self.redeemed)
     
     @property
@@ -1395,7 +1395,7 @@ class MGiftCode(mongo.Document):
     
     @staticmethod
     def create_code(gift_code=None):
-        u = unicode(uuid.uuid4())
+        u = str(uuid.uuid4())
         code = u[:8] + u[9:13]
         if gift_code:
             code = gift_code + code[len(gift_code):]
@@ -1421,7 +1421,7 @@ class MRedeemedCode(mongo.Document):
         'indexes': ['user_id', 'gift_code', 'redeemed_date'],
     }
     
-    def __unicode__(self):
+    def __str__(self):
         return "%s redeemed %s on %s" % (self.user_id, self.gift_code, self.redeemed_date)
     
     @classmethod
@@ -1461,7 +1461,7 @@ class MCustomStyling(mongo.Document):
         'indexes': ['user_id'],
     }
     
-    def __unicode__(self):
+    def __str__(self):
         return "%s custom style %s/%s %s" % (self.user_id, len(self.custom_css) if self.custom_css else "-", 
                                              len(self.custom_js) if self.custom_js else "-", self.updated_date)
     
@@ -1531,7 +1531,7 @@ class RNewUserQueue:
         r = redis.Redis(connection_pool=settings.REDIS_FEED_UPDATE_POOL)
         now = time.time()
         
-        r.zadd(cls.KEY, user_id, now)
+        r.zadd(cls.KEY, { user_id: now })
     
     @classmethod
     def user_count(cls):

@@ -5,7 +5,7 @@ import dateutil
 import hashlib
 import base64
 from random import randint
-from HTMLParser import HTMLParser
+from html.parser import HTMLParser
 from lxml.html.diff import tokenize, fixup_ins_del_tags, htmldiff_tokens
 from lxml.etree import ParserError, XMLSyntaxError
 import lxml.html, lxml.etree
@@ -16,7 +16,7 @@ from django.utils.html import strip_tags as strip_tags_django
 from utils.tornado_escape import linkify as linkify_tornado
 from utils.tornado_escape import xhtml_unescape as xhtml_unescape_tornado
 from vendor import reseekfile
-from utils import feedparser
+from vendor import feedparser
 
 import hmac
 from binascii import hexlify
@@ -125,7 +125,7 @@ def pre_process_story(entry, encoding):
     # else:
     #     entry['link'] = urlquote(entry_link)
     if isinstance(entry.get('guid'), dict):
-        entry['guid'] = unicode(entry['guid'])
+        entry['guid'] = str(entry['guid'])
 
     # Normalize story content/summary
     summary = entry.get('summary') or ""
@@ -144,7 +144,7 @@ def pre_process_story(entry, encoding):
     if 'summary_detail' in entry and entry['summary_detail'].get('type', None) == 'text/plain':
         try:
             entry['story_content'] = feedparser._sanitizeHTML(entry['story_content'], encoding, 'text/plain')
-            if encoding and not isinstance(entry['story_content'], unicode):
+            if encoding and not isinstance(entry['story_content'], str):
                 entry['story_content'] = entry['story_content'].decode(encoding, 'ignore')
         except UnicodeEncodeError:
             pass
@@ -399,9 +399,9 @@ def create_imageproxy_signed_url(base_url, hmac_key, url, options=None):
     if isinstance(options, int): options = [str(options)]
     if not isinstance(options, list): options = [options]
     base_url = base_url.rstrip('/')
-    signature = base64.urlsafe_b64encode(hmac.new(hmac_key, msg=url, digestmod=hashlib.sha256).digest())
+    signature = base64.urlsafe_b64encode(hmac.new(hmac_key.encode(), msg=url.encode(), digestmod=hashlib.sha256).digest())
     options.append('sc')
-    options.append('s'+signature)
+    options.append('s'+signature.decode())
 
     return ('{base}/{options}/{url}'
             .format(base=base_url, options=','.join(options), url=url))

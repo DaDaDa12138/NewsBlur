@@ -2,7 +2,6 @@ import datetime
 import mongoengine as mongo
 import pickle
 import base64
-from StringIO import StringIO
 from oauth2client.client import Error as OAuthError
 from xml.etree.ElementTree import Element, SubElement, Comment, tostring
 from lxml import etree
@@ -17,13 +16,9 @@ from utils import log as logging
 from utils.feed_functions import timelimit
 from utils.feed_functions import add_object_to_folder
 
-from south.modelsinspector import add_introspection_rules
-add_introspection_rules([], ["^oauth2client\.django_orm\.FlowField"])
-add_introspection_rules([], ["^oauth2client\.django_orm\.CredentialsField"])
-
 
 class OAuthToken(models.Model):
-    user = models.OneToOneField(User, null=True, blank=True)
+    user = models.OneToOneField(User, null=True, blank=True, on_delete=models.CASCADE)
     session_id = models.CharField(max_length=50, null=True, blank=True)
     uuid = models.CharField(max_length=50, null=True, blank=True)
     remote_ip = models.CharField(max_length=50, null=True, blank=True)
@@ -79,14 +74,14 @@ class OPMLExporter(Importer):
             if isinstance(obj, int) and obj in self.feeds:
                 feed = self.feeds[obj]
                 if verbose:
-                    print "     ---> Adding feed: %s - %s" % (feed['id'],
-                                                              feed['feed_title'][:30])
+                    print("     ---> Adding feed: %s - %s" % (feed['id'],
+                                                              feed['feed_title'][:30]))
                 feed_attrs = self.make_feed_row(feed)
                 body.append(Element('outline', feed_attrs))
             elif isinstance(obj, dict):
-                for folder_title, folder_objs in obj.items():
+                for folder_title, folder_objs in list(obj.items()):
                     if verbose:
-                        print " ---> Adding folder: %s" % folder_title
+                        print(" ---> Adding folder: %s" % folder_title)
                     folder_element = Element('outline', {'text': folder_title, 'title': folder_title})
                     body.append(self.process_outline(folder_element, folder_objs, verbose=verbose))
         return body
@@ -224,7 +219,7 @@ class UploadedOPML(mongo.Document):
     opml_file = mongo.StringField()
     upload_date = mongo.DateTimeField(default=datetime.datetime.now)
     
-    def __unicode__(self):
+    def __str__(self):
         user = User.objects.get(pk=self.user_id)
         return "%s: %s characters" % (user.username, len(self.opml_file))
     
@@ -234,4 +229,3 @@ class UploadedOPML(mongo.Document):
         'order': '-upload_date',
         'indexes': ['user_id', '-upload_date'],
     }
-    

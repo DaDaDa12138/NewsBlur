@@ -3,7 +3,7 @@
 from PIL import Image
 from PIL import ImageOps as PILOps
 from PIL.ExifTags import TAGS
-from StringIO import StringIO
+from io import BytesIO
 from vendor import reseekfile
 
 PROFILE_PICTURE_SIZES = {
@@ -22,7 +22,7 @@ class ImageOps:
         This must happen in this function because PIL is transforming the 
         original as it works."""
         
-        image_file = StringIO(image_body)
+        image_file = BytesIO(image_body)
         try:
             image = Image.open(image_file)
         except IOError:
@@ -42,7 +42,7 @@ class ImageOps:
                                method=Image.ANTIALIAS, 
                                centering=(0.5, 0.5))
         
-        output = StringIO()
+        output = BytesIO()
         if format.lower() == 'jpg':
             format = 'jpeg'
         image.save(output, format=format, quality=95)
@@ -58,7 +58,7 @@ class ImageOps:
         if hasattr(image, '_getexif'):
             exif = image._getexif()
             if exif:
-                for tag, value in exif.items():
+                for tag, value in list(exif.items()):
                     decoded = TAGS.get(tag, tag)
                     if decoded == 'Orientation':
                         if value == 6:

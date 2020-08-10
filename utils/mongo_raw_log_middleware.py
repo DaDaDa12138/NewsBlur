@@ -6,9 +6,14 @@ from pymongo.mongo_replica_set_client import MongoReplicaSetClient
 from time import time
 import struct
 import bson
+import pymongo
 from bson.errors import InvalidBSON
 
 class MongoDumpMiddleware(object):    
+
+    def __init__(self, get_response=None):
+        self.get_response = get_response
+
     def activated(self, request):
         return (settings.DEBUG_QUERIES or 
                 (hasattr(request, 'activated_segments') and
@@ -53,7 +58,8 @@ class MongoDumpMiddleware(object):
 
     def _instrument(self, original_method):
         def instrumented_method(*args, **kwargs):
-            query = args[1].get_message(False, False)
+            with args[0]._socket_for_writes() as sock_info:
+                query = args[1].get_message(False, sock_info, False)
             message = _mongodb_decode_wire_protocol(query[1])
             # message = _mongodb_decode_wire_protocol(args[1][1])
             if not message or message['msg_id'] in self._used_msg_ids:
@@ -63,12 +69,20 @@ class MongoDumpMiddleware(object):
             result = original_method(*args, **kwargs)
             stop = time()
             duration = stop - start
-            connection.queries.append({
+            if not getattr(connection, 'queriesx', False):
+                connection.queriesx = []
+            connection.queriesx.append({
                 'mongo': message,
                 'time': '%.3f' % duration,
             })
             return result
         return instrumented_method
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        response = self.process_response(request, response)
+
+        return response
 
 def _mongodb_decode_wire_protocol(message):
     """ http://www.mongodb.org/display/DOCS/Mongo+Wire+Protocol """
@@ -85,9 +99,9 @@ def _mongodb_decode_wire_protocol(message):
     _, msg_id, _, opcode, _ = struct.unpack('<iiiii', message[:20])
     op = MONGO_OPS.get(opcode, 'unknown')
     zidx = 20
-    collection_name_size = message[zidx:].find('\0')
+    collection_name_size = message[zidx:].find(b'\0')
     collection_name = message[zidx:zidx+collection_name_size]
-    if '.system.' in collection_name:
+    if b'.system.' in collection_name:
         return
     zidx += collection_name_size + 1
     skip, limit = struct.unpack('<ii', message[zidx:zidx+8])

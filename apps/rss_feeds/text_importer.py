@@ -13,8 +13,8 @@ from OpenSSL.SSL import Error as OpenSSLError
 from pyasn1.error import PyAsn1Error
 from django.utils.encoding import smart_str
 from django.conf import settings
-from BeautifulSoup import BeautifulSoup
-from urlparse import urljoin
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
  
 BROKEN_URLS = [
     "gamespot.com",
@@ -122,13 +122,13 @@ class TextImporter:
 
         if text:
             text = text.replace("\xc2\xa0", " ") # Non-breaking space, is mangled when encoding is not utf-8
-            text = text.replace("\u00a0", " ") # Non-breaking space, is mangled when encoding is not utf-8
+            text = text.replace("\\u00a0", " ") # Non-breaking space, is mangled when encoding is not utf-8
 
         original_text_doc = readability.Document(text, url=resp.url,
                                                  positive_keywords="post, entry, postProp, article, postContent, postField")
         try:
             content = original_text_doc.summary(html_partial=True)
-        except (readability.Unparseable, ParserError), e:
+        except (readability.Unparseable, ParserError) as e:
             logging.user(self.request, "~SN~FRFailed~FY to fetch ~FGoriginal text~FY: %s" % e)
             return
 
@@ -148,10 +148,10 @@ class TextImporter:
             original_story_content = ""
         if content and len(content) > len(original_story_content):
             if self.story and not skip_save:
-                self.story.original_text_z = zlib.compress(smart_str(content))
+                self.story.original_text_z = zlib.compress(smart_str(content).encode())
                 try:
                     self.story.save()
-                except NotUniqueError, e:
+                except NotUniqueError as e:
                     logging.user(self.request, ("~SN~FYFetched ~FGoriginal text~FY: %s" % (e)), warn_color=False)
                     pass
             logging.user(self.request, ("~SN~FYFetched ~FGoriginal text~FY: now ~SB%s bytes~SN vs. was ~SB%s bytes" % (
@@ -173,13 +173,13 @@ class TextImporter:
         return content
 
     def rewrite_content(self, content):
-        soup = BeautifulSoup(content)
+        soup = BeautifulSoup(content, features="lxml")
         
         for noscript in soup.findAll('noscript'):
             if len(noscript.contents) > 0:
                 noscript.replaceWith(noscript.contents[0])
         
-        content = unicode(soup)
+        content = str(soup)
         
         images = set([img['src'] for img in soup.findAll('img') if 'src' in img])
         for image_url in images:
@@ -203,7 +203,7 @@ class TextImporter:
                 url = "https://www.newsblur.com/rss_feeds/original_text_fetcher?url=%s" % url
             
         try:
-            r = requests.get(url, headers=headers, verify=False)
+            r = requests.get(url, headers=headers)
             r.connection.close()
         except (AttributeError, SocketError, requests.ConnectionError,
                 requests.models.MissingSchema, requests.sessions.InvalidSchema,
@@ -212,7 +212,7 @@ class TextImporter:
                 requests.models.ChunkedEncodingError,
                 requests.models.ContentDecodingError,
                 urllib3.exceptions.LocationValueError,
-                LocationParseError, OpenSSLError, PyAsn1Error), e:
+                LocationParseError, OpenSSLError, PyAsn1Error) as e:
             logging.user(self.request, "~SN~FRFailed~FY to fetch ~FGoriginal text~FY: %s" % e)
             return
         return r

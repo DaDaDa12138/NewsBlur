@@ -14,11 +14,11 @@ PLANS = [
     ("newsblur-premium-36", mark_safe("$36 / year <span class='NB-small'>($3/month)</span>")),
 ]
 
-class HorizRadioRenderer(forms.RadioSelect.renderer):
+class HorizRadioRenderer(forms.RadioSelect):
     """ this overrides widget method to put radio buttons horizontally
         instead of vertically.
     """
-    def render(self):
+    def render(self, name, value, attrs=None, renderer=None):
             """Outputs radios"""
             choices = '\n'.join(['%s\n' % w for w in self])
             return mark_safe('<div class="NB-stripe-plan-choice">%s</div>' % choices)
@@ -35,7 +35,7 @@ class StripePlusPaymentForm(StripePaymentForm):
     email = forms.EmailField(widget=forms.TextInput(attrs=dict(maxlength=75)),
                              label='Email address',
                              required=False)
-    plan = forms.ChoiceField(required=False, widget=forms.RadioSelect(renderer=HorizRadioRenderer),
+    plan = forms.ChoiceField(required=False, widget=HorizRadioRenderer,
                              choices=PLANS, label='Plan')
 
 
@@ -94,6 +94,7 @@ class ForgotPasswordReturnForm(forms.Form):
                                required=False)
 
 class AccountSettingsForm(forms.Form):
+    use_required_attribute = False
     username = forms.RegexField(regex=r'^\w+$',
                                 max_length=30,
                                 widget=forms.TextInput(attrs={'class': 'NB-input'}),
@@ -192,6 +193,7 @@ class AccountSettingsForm(forms.Form):
         MCustomStyling.save_user(self.user.pk, custom_css, custom_js)
         
 class RedeemCodeForm(forms.Form):
+    use_required_attribute = False
     gift_code = forms.CharField(widget=forms.TextInput(),
                                label="Gift code",
                                required=True)
