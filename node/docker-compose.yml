@@ -1,0 +1,27 @@
+version: '3'
+services:
+  e2e-electron: # this container will run Cypress test using built-in Electron browser
+    network_mode: "host"
+    image: "cypress/included:4.1.0"
+    volumes:
+      - ./cypress:/cypress
+      - ./cypress.json:/cypress.json
+
+  e2e-chrome: # this container will run Cypress test using Chrome browser
+    network_mode: "host"
+    image: "cypress/included:4.1.0"
+    command: "--browser chrome"
+    volumes:
+      - ./cypress:/cypress
+      - ./cypress.json:/cypress.json
+
+  e2e-firefox: # this container will run Cypress test using Firefox browser
+    network_mode: "host"
+    image: "cypress/included:4.1.0"
+    # note that both Chrome and Firefox browsers were pre-installed in the Docker image
+    command: "--browser firefox --config video=false"
+    environment: # if you want to debug FF run, pass DEBUG variable like
+      - DEBUG=cypress:server:browsers:firefox-util,cypress:server:util:process_profiler
+    volumes:
+      - ./cypress:/cypress
+      - ./cypress.json:/cypress.json
